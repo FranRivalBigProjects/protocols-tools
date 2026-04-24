@@ -773,36 +773,30 @@ footer p {
     <div class="tool-body">
       <div class="tool-input-side">
         <div class="input-label">// Paste .proto file</div>
-        <textarea id="protoInput" placeholder="syntax = &quot;proto3&quot;;
-
-message User {
-string name = 1;
-int32 id = 2;
-}”></textarea>
-<div class="parse-btn-wrap">
-<button class="btn-parse" onclick="parseProto()">Visualize Schema</button>
-</div>
-</div>
-<div class="tool-viz-side">
-<div class="viz-label">
-<span>// Schema diagram</span>
-<span id="vizCount" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);"></span>
-</div>
-<div class="viz-area" id="vizArea">
-<div class="viz-empty" id="vizEmpty">
-<span class="viz-empty-icon">⬡</span>
-<span>Paste a .proto file and click<br>Visualize Schema</span>
-</div>
-</div>
-<div class="stats-bar" id="statsBar" style="display:none">
-<span class="stat-item">Messages <span class="stat-val" id="statMsg">0</span></span>
-<span class="stat-item">Fields <span class="stat-val" id="statFields">0</span></span>
-<span class="stat-item">Enums <span class="stat-val" id="statEnums">0</span></span>
-<span class="stat-item">Services <span class="stat-val" id="statSvc">0</span></span>
-</div>
-</div>
-</div>
-
+        <textarea id="protoInput" placeholder="Paste your .proto file here, or click Load Sample"></textarea>
+        <div class="parse-btn-wrap">
+          <button class="btn-parse" onclick="parseProto()">Visualize Schema</button>
+        </div>
+      </div>
+      <div class="tool-viz-side">
+        <div class="viz-label">
+          <span>// Schema diagram</span>
+          <span id="vizCount" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);"></span>
+        </div>
+        <div class="viz-area" id="vizArea">
+          <div class="viz-empty" id="vizEmpty">
+            <span class="viz-empty-icon">⬡</span>
+            <span>Paste a .proto file and click<br>Visualize Schema</span>
+          </div>
+        </div>
+        <div class="stats-bar" id="statsBar" style="display:none">
+          <span class="stat-item">Messages <span class="stat-val" id="statMsg">0</span></span>
+          <span class="stat-item">Fields <span class="stat-val" id="statFields">0</span></span>
+          <span class="stat-item">Enums <span class="stat-val" id="statEnums">0</span></span>
+          <span class="stat-item">Services <span class="stat-val" id="statSvc">0</span></span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <hr class="divider">
@@ -919,7 +913,7 @@ const SCALAR_TYPES = new Set([
   'bool','string','bytes'
 ]);
 
-function parseProto(input) {
+function runParse(input) {
   const text = input || document.getElementById('protoInput').value.trim();
   const vizArea = document.getElementById('vizArea');
   const vizEmpty = document.getElementById('vizEmpty');
@@ -1157,7 +1151,7 @@ service UserService {
 
 function loadSample() {
   document.getElementById('protoInput').value = SAMPLE;
-  setTimeout(() => parseProto(), 50);
+  setTimeout(() => runParse(), 50);
 }
 
 function clearTool() {
@@ -1172,7 +1166,7 @@ function toggleFaq(btn) {
 }
 
 // allow button to call parseProto without argument
-window.parseProto = () => parseProto();
+window.parseProto = () => runParse();
 </script>
 
 </body>
