@@ -6,9 +6,9 @@
 <meta name="google-site-verification" content="PkLa_ViOo6FAHpvh8SacceMb95o9tePRdrqLNBz9X1M" />
 <meta name="robots" content="index, follow">
 
-<title>Protobuf Specification Visualization &amp; Structure Visualization</title>
+<title>Protobuf Visualizer: Specification Visualization &amp; Structure Visualization</title>
 
-<meta name="description" content="Free online protobuf specification visualization and structure visualization tool. Paste a .proto file to see messages, fields, enums, oneof groups, reserved fields, field options and services as an interactive diagram. No login, no install.">
+<meta name="description" content="Free online protobuf visualizer with a live .proto editor: specification visualization and structure visualization as an interactive D3 graph. Type or paste a .proto file to see messages, fields, enums, oneof groups, reserved fields, field options and services as an interactive diagram. No login, no install.">
 
 <meta name="keywords" content="protobuf specification visualization, protobuf structure visualization, protobuf schema visualizer, protobuf visualization, proto3 schema diagram, protobuf message diagram, grpc schema visualizer, protocol buffers visualizer, protobuf viewer online, proto file visualizer">
 
@@ -22,6 +22,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js" defer></script>
 <style>
 :root {
   --bg: #050810;
@@ -747,6 +748,12 @@ footer p {
   margin: 0;
 }
 
+.view-toggle{display:flex;gap:6px;align-items:center}
+.vt-btn{font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:4px;border:1px solid var(--border-light);background:transparent;color:var(--text-muted);cursor:pointer}
+.vt-btn.on{color:var(--cyan);border-color:rgba(6,182,212,0.4);background:var(--cyan-dim2)}
+#graphArea{flex:1;min-height:360px;position:relative}
+#graphSvg{width:100%;height:100%;min-height:360px;display:block;cursor:grab}
+.g-hint{position:absolute;left:10px;bottom:8px;font-family:var(--mono);font-size:10px;color:var(--text-muted);pointer-events:none}
 @media (max-width: 680px) {
   .tool-body { grid-template-columns: 1fr; }
   .tool-input-side { border-right: none; border-bottom: 1px solid var(--border); }
@@ -842,7 +849,7 @@ footer p {
   <!-- HERO -->
 
   <section class="hero">
-    <p class="hero-eyebrow">Free Protocol Buffers Tool</p>
+    <p class="hero-eyebrow">Free Protobuf Visualizer &amp; Live .proto Editor</p>
     <h1>Protobuf Specification Visualization &amp;<br><em>Structure Visualization</em></h1>
     <p class="hero-sub">
       Paste your <strong>.proto file</strong> to generate an interactive <strong>specification visualization</strong> and <strong>structure visualization</strong> — see messages, fields, enums, oneof groups, reserved fields, field options, and services as a live diagram. <strong>No login, no account, no install</strong> — runs entirely in the browser.
@@ -871,17 +878,18 @@ footer p {
     <div class="tool-body">
       <div class="tool-input-side">
         <div class="input-label">// Paste .proto file</div>
-        <textarea id="protoInput" placeholder="Paste your .proto file here, or click Load Sample"></textarea>
+        <textarea id="protoInput" oninput="liveParse()" spellcheck="false" placeholder="Paste your .proto file here, or click Load Sample"></textarea>
         <div class="parse-btn-wrap">
           <button class="btn-parse" onclick="parseProto()">Visualize Schema</button>
         </div>
       </div>
       <div class="tool-viz-side">
         <div class="viz-label">
-          <span>// Schema diagram</span>
+          <span class="view-toggle"><span>// Schema</span><button class="vt-btn on" id="btnGraph" onclick="setView('graph')">Graph</button><button class="vt-btn" id="btnCards" onclick="setView('cards')">Cards</button><button class="vt-btn" onclick="exportSvg()">Export SVG</button></span>
           <span id="vizCount" style="font-family:var(--mono);font-size:10px;color:var(--text-dim);"></span>
         </div>
-        <div class="viz-area" id="vizArea">
+        <div id="graphArea"><div class="viz-empty" id="graphEmpty" style="position:absolute;inset:0;"><span class="viz-empty-icon">&#11041;</span><span>Type or paste a .proto file<br>the graph updates live</span></div><svg id="graphSvg"></svg><div class="g-hint">drag nodes &middot; scroll to zoom &middot; double-click to unpin &middot; cyan message / purple enum / green service</div></div>
+        <div class="viz-area" id="vizArea" style="display:none">
           <div class="viz-empty" id="vizEmpty">
             <span class="viz-empty-icon">⬡</span>
             <span>Paste a .proto file and click<br>Visualize Schema</span>
@@ -1273,6 +1281,7 @@ function runParse(input) {
 
   if (messages.length === 0 && enums.length === 0 && services.length === 0) {
     vizArea.innerHTML = '<div class="parse-error">// Could not parse proto schema.<br>Make sure you\'re pasting valid proto3 syntax.<br>Try clicking "Load Sample" to see an example.</div>';
+    document.getElementById('vizCount').textContent = 'parse error';
     document.getElementById('statsBar').style.display = 'none';
     return;
   }
@@ -1361,6 +1370,8 @@ function runParse(input) {
 
   html += '</div>';
   vizArea.innerHTML = html;
+  lastModel = { messages: messages, enums: enums, services: services };
+  renderGraph();
 
   const totalFields = messages.reduce((s, m) => s + m.fields.length, 0);
   document.getElementById('statsBar').style.display = 'flex';
@@ -1375,6 +1386,153 @@ function runParse(input) {
 }
 
 // ─── SAMPLE ───
+var lastModel = null;
+var liveTimer = null;
+var currentView = 'graph';
+var sim = null;
+var KIND_COLOR = { message: '#06b6d4', enum: '#a78bfa', service: '#10b981' };
+
+function liveParse() {
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(function () {
+    var v = document.getElementById('protoInput').value;
+    if (v.replace(/\s/g, '')) { runParse(); }
+  }, 400);
+}
+
+function setView(v) {
+  currentView = v;
+  document.getElementById('graphArea').style.display = v === 'graph' ? 'block' : 'none';
+  document.getElementById('vizArea').style.display = v === 'cards' ? 'block' : 'none';
+  document.getElementById('btnGraph').className = 'vt-btn' + (v === 'graph' ? ' on' : '');
+  document.getElementById('btnCards').className = 'vt-btn' + (v === 'cards' ? ' on' : '');
+  if (v === 'graph') renderGraph();
+}
+
+function renderGraph() {
+  var emptyEl = document.getElementById('graphEmpty');
+  var svgEl = document.getElementById('graphSvg');
+  if (!window.d3) {
+    emptyEl.style.display = 'flex';
+    emptyEl.innerHTML = '<span>D3 failed to load. Use the Cards view.</span>';
+    return;
+  }
+  if (!lastModel || currentView !== 'graph') return;
+  emptyEl.style.display = 'none';
+  var m = lastModel, nodes = [], links = [], byName = {}, seen = {}, i, j;
+
+  function add(kind, name, count) {
+    var n = { id: kind + ':' + name, name: name, kind: kind, count: count, r: 12 + Math.min(14, Math.sqrt(count) * 3) };
+    byName[name] = n;
+    nodes.push(n);
+    return n;
+  }
+  function link(a, b, cls) {
+    if (!a || !b || a === b) return;
+    var k = a.id + '>' + b.id + cls;
+    if (seen[k]) return;
+    seen[k] = 1;
+    links.push({ source: a.id, target: b.id, cls: cls });
+  }
+  function base(t) { return String(t).split('.').pop(); }
+
+  for (i = 0; i < m.messages.length; i++) add('message', m.messages[i].name, m.messages[i].fields.length);
+  for (i = 0; i < m.enums.length; i++) add('enum', m.enums[i].name, m.enums[i].values.length);
+  for (i = 0; i < m.services.length; i++) add('service', m.services[i].name, m.services[i].rpcs.length);
+
+  for (i = 0; i < m.messages.length; i++) {
+    var src = byName[m.messages[i].name];
+    for (j = 0; j < m.messages[i].fields.length; j++) {
+      var tgt = byName[base(m.messages[i].fields[j].type)];
+      if (tgt) link(src, tgt, tgt.kind === 'enum' ? 'enum' : 'msg');
+    }
+  }
+  for (i = 0; i < m.services.length; i++) {
+    for (j = 0; j < m.services[i].rpcs.length; j++) {
+      link(byName[m.services[i].name], byName[base(m.services[i].rpcs[j].input)], 'rpc');
+      link(byName[m.services[i].name], byName[base(m.services[i].rpcs[j].output)], 'rpc');
+    }
+  }
+
+  var w = svgEl.clientWidth || 600, h = svgEl.clientHeight || 360;
+  var svg = d3.select(svgEl);
+  if (sim) sim.stop();
+  svg.selectAll('*').remove();
+  svg.attr('viewBox', '0 0 ' + w + ' ' + h);
+  svg.append('defs').append('marker').attr('id', 'arr').attr('viewBox', '0 -4 8 8').attr('refX', 8).attr('refY', 0)
+    .attr('markerWidth', 7).attr('markerHeight', 7).attr('orient', 'auto')
+    .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#4b6a94');
+  var root = svg.append('g');
+  svg.call(d3.zoom().scaleExtent([0.2, 4]).on('zoom', function (e) { root.attr('transform', e.transform); }));
+
+  var link$ = root.append('g').selectAll('line').data(links).enter().append('line')
+    .attr('stroke', function (d) { return d.cls === 'enum' ? '#7c6bd6' : d.cls === 'rpc' ? '#10b981' : '#4b6a94'; })
+    .attr('stroke-width', 1.4)
+    .attr('stroke-dasharray', function (d) { return d.cls === 'enum' ? '4 3' : null; })
+    .attr('marker-end', 'url(#arr)');
+
+  sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(function (d) { return d.id; }).distance(120))
+    .force('charge', d3.forceManyBody().strength(-420))
+    .force('center', d3.forceCenter(w / 2, h / 2))
+    .force('collide', d3.forceCollide(function (d) { return d.r + 22; }));
+
+  var drag = d3.drag()
+    .on('start', function (e, d) { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+    .on('drag', function (e, d) { d.fx = e.x; d.fy = e.y; })
+    .on('end', function (e) { if (!e.active) sim.alphaTarget(0); });
+
+  var node$ = root.append('g').selectAll('g').data(nodes).enter().append('g').style('cursor', 'pointer').call(drag)
+    .on('dblclick', function (e, d) { d.fx = null; d.fy = null; sim.alpha(0.3).restart(); })
+    .on('mouseover', function (e, d) {
+      var nb = {};
+      nb[d.id] = 1;
+      links.forEach(function (l) {
+        if (l.source.id === d.id) nb[l.target.id] = 1;
+        if (l.target.id === d.id) nb[l.source.id] = 1;
+      });
+      node$.style('opacity', function (n) { return nb[n.id] ? 1 : 0.2; });
+      link$.style('opacity', function (l) { return (l.source.id === d.id || l.target.id === d.id) ? 1 : 0.1; });
+    })
+    .on('mouseout', function () { node$.style('opacity', 1); link$.style('opacity', 1); });
+
+  node$.append('title').text(function (d) { return d.kind + ' ' + d.name + ' (' + d.count + (d.kind === 'message' ? ' fields)' : d.kind === 'enum' ? ' values)' : ' rpcs)'); });
+  node$.append('circle').attr('r', function (d) { return d.r; }).attr('fill', '#0d1220')
+    .attr('stroke', function (d) { return KIND_COLOR[d.kind]; }).attr('stroke-width', 2);
+  node$.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em').attr('font-size', 10)
+    .attr('font-family', 'JetBrains Mono, monospace').attr('fill', '#64748b').text(function (d) { return d.count; });
+  node$.append('text').attr('text-anchor', 'middle').attr('y', function (d) { return d.r + 13; }).attr('font-size', 11)
+    .attr('font-family', 'JetBrains Mono, monospace').attr('fill', '#cbd5e1').text(function (d) { return d.name; });
+
+  sim.on('tick', function () {
+    link$.each(function (d) {
+      var dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+      var dist = Math.sqrt(dx * dx + dy * dy) || 1, r = d.target.r + 3;
+      d3.select(this).attr('x1', d.source.x).attr('y1', d.source.y)
+        .attr('x2', d.target.x - dx / dist * r).attr('y2', d.target.y - dy / dist * r);
+    });
+    node$.attr('transform', function (d) { return 'translate(' + d.x + ',' + d.y + ')'; });
+  });
+}
+
+function exportSvg() {
+  if (!lastModel) return;
+  var clone = document.getElementById('graphSvg').cloneNode(true);
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  var bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  bg.setAttribute('width', '100%');
+  bg.setAttribute('height', '100%');
+  bg.setAttribute('fill', '#050810');
+  clone.insertBefore(bg, clone.firstChild);
+  var blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'protobuf-schema.svg';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 const SAMPLE = "syntax = \"proto3\";\n\npackage userservice.v1;\n\nimport \"google/protobuf/timestamp.proto\";\n\n// Represents the current status of a user account.\nenum UserStatus {\n  UNKNOWN = 0;\n  ACTIVE = 1;\n  INACTIVE = 2;\n  BANNED = 3;\n}\n\nmessage Address {\n  string street = 1;\n  string city = 2;\n  string country = 3;\n  string postal_code = 4;\n}\n\n// A registered user of the platform.\nmessage User {\n  int32 id = 1; // internal unique identifier\n  string username = 2;\n  string email = 3;\n  UserStatus status = 4;\n  Address address = 5;\n  repeated string roles = 6;\n  int64 created_at = 7;\n  string legacy_phone = 8 [deprecated = true];\n\n  oneof contact_method {\n    string phone_number = 9;\n    string telegram_handle = 10;\n  }\n\n  reserved 11, 12, 15 to 18;\n  reserved \"old_field\";\n}\n\nmessage CreateUserRequest {\n  string username = 1;\n  string email = 2;\n  Address address = 3;\n}\n\nmessage CreateUserResponse {\n  User user = 1;\n  string message = 2;\n}\n\nmessage GetUserRequest {\n  int32 id = 1;\n}\n\nmessage ListUsersRequest {\n  int32 page = 1;\n  int32 page_size = 2;\n  UserStatus filter_status = 3;\n}\n\nmessage ListUsersResponse {\n  repeated User users = 1;\n  int32 total_count = 2;\n}\n\n// Handles user account operations.\nservice UserService {\n  rpc CreateUser (CreateUserRequest) returns (CreateUserResponse);\n  rpc GetUser (GetUserRequest) returns (User);\n  rpc ListUsers (ListUsersRequest) returns (ListUsersResponse);\n}";
 
 function loadSample() {
@@ -1387,6 +1545,10 @@ function clearTool() {
   document.getElementById('vizArea').innerHTML = '<div class="viz-empty" id="vizEmpty"><span class="viz-empty-icon">⬡</span><span>Paste a .proto file and click<br>Visualize Schema</span></div>';
   document.getElementById('statsBar').style.display = 'none';
   document.getElementById('vizCount').textContent = '';
+  lastModel = null;
+  if (sim) sim.stop();
+  document.getElementById('graphSvg').innerHTML = '';
+  document.getElementById('graphEmpty').style.display = 'flex';
 }
 
 function toggleFaq(btn) {
